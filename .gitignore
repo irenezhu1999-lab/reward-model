@@ -1,0 +1,13 @@
+# data files with local absolute paths — commit scripts only
+annotations.jsonl
+annotations.jsonl.v1_backup
+videos.jsonl
+comparisons.jsonl
+
+# model weights (regenerate from training)
+fluidity_model_weights.json
+
+# python cache
+__pycache__/
+*.pyc
+*.pyo
