@@ -118,71 +118,102 @@ def predict(w, x):
 # Load data
 # ─────────────────────────────────────────────────────────────────────────────
 
-def load_dataset():
+def load_dataset(template_filter: str = None):
     with open(ANNOTATIONS, encoding="utf-8") as f:
         anns = [json.loads(l) for l in f if l.strip()]
 
-    X, y, ids = [], [], []
+    X, y, ids, templates = [], [], [], []
     for a in anns:
         if a["scores"]["fluidity"] is None:
             continue
         feats = extract_features(a)
         if feats is None:
             continue
+        tmpl = "patronus" if "patronus" in a["video_id"] else "pet_greeting"
+        if template_filter and tmpl != template_filter:
+            continue
         X.append(feats)
         y.append(float(a["scores"]["fluidity"]))
         ids.append(a["video_id"])
-    return X, y, ids
+        templates.append(tmpl)
+    return X, y, ids, templates
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Train + evaluate
 # ─────────────────────────────────────────────────────────────────────────────
 
-def train_and_eval():
-    X, y, ids = load_dataset()
+def _loo_cv(X, y, ids):
     n = len(X)
-    print(f"Dataset: {n} samples, fluidity range {int(min(y))}-{int(max(y))}")
-
-    # LOO-CV
     preds = []
     for i in range(n):
         X_tr = [X[j] for j in range(n) if j != i]
         y_tr = [y[j] for j in range(n) if j != i]
         w = fit(X_tr, y_tr)
         preds.append(predict(w, X[i]))
-
-    errors = [abs(p - true) for p, true in zip(preds, y)]
+    errors = [abs(p - t) for p, t in zip(preds, y)]
     mae = sum(errors) / n
     baseline_mae = sum(abs(yi - sum(y)/n) for yi in y) / n
     within_1 = sum(1 for e in errors if e <= 1.0)
+    return preds, errors, mae, baseline_mae, within_1
 
-    print(f"LOO-CV MAE:  {mae:.2f}  (baseline: {baseline_mae:.2f})")
+
+def train_and_eval():
+    X, y, ids, templates = load_dataset()
+    n = len(X)
+    print(f"Dataset: {n} samples, fluidity range {int(min(y))}-{int(max(y))}")
+
+    # Overall LOO-CV
+    preds, errors, mae, baseline_mae, within_1 = _loo_cv(X, y, ids)
+    print(f"\nLOO-CV MAE:  {mae:.2f}  (baseline: {baseline_mae:.2f})")
     print(f"Within ±1:   {within_1}/{n} = {within_1/n*100:.0f}%")
 
-    # Train final model on all data
-    w = fit(X, y)
+    # Stratified by template
+    print("\nStratified LOO-CV:")
+    for tmpl in ("patronus", "pet_greeting"):
+        idx = [i for i, t in enumerate(templates) if t == tmpl]
+        if not idx:
+            continue
+        Xs = [X[i] for i in idx]
+        ys = [y[i] for i in idx]
+        is_ = [ids[i] for i in idx]
+        _, errs, tmpl_mae, tmpl_base, tmpl_w1 = _loo_cv(Xs, ys, is_)
+        print(f"  {tmpl:<14} N={len(idx):3d}  MAE={tmpl_mae:.2f}  "
+              f"baseline={tmpl_base:.2f}  within±1={tmpl_w1/len(idx)*100:.0f}%")
 
-    print("\nModel weights:")
-    for name, coef in zip(FEATURE_NAMES, w):
+    # Train final model per template + save
+    all_weights = {}
+    for tmpl in ("patronus", "pet_greeting"):
+        idx = [i for i, t in enumerate(templates) if t == tmpl]
+        if not idx:
+            continue
+        Xs = [X[i] for i in idx]
+        ys = [y[i] for i in idx]
+        _, errs, tmpl_mae, _, _ = _loo_cv(Xs, ys, [ids[i] for i in idx])
+        w = fit(Xs, ys)
+        all_weights[tmpl] = {"weights": w, "n_train": len(idx), "loo_cv_mae": round(tmpl_mae, 3)}
+
+    print("\nModel weights (patronus):")
+    for name, coef in zip(FEATURE_NAMES, all_weights["patronus"]["weights"]):
         bar = "+" * int(abs(coef) * 2) if coef > 0 else "-" * int(abs(coef) * 2)
         print(f"  {name:<22} {coef:+.3f}  {bar}")
 
-    # Save weights
     MODEL_OUT.write_text(json.dumps({
-        "weights": w,
         "feature_names": FEATURE_NAMES,
+        "models": all_weights,
+        # legacy flat format for --predict (uses patronus weights as default)
+        "weights": all_weights["patronus"]["weights"],
         "n_train": n,
         "loo_cv_mae": round(mae, 3),
     }, indent=2))
     print(f"\nSaved: {MODEL_OUT}")
 
-    # Worst predictions
+    # Worst overall
     worst = sorted(zip(errors, ids, y, preds), reverse=True)[:5]
-    print("\nWorst predictions:")
+    print("\nWorst predictions (overall):")
     for err, vid, true, pred in worst:
         print(f"  {vid[:45]:<45} true={int(true)}  pred={pred:.1f}  err={err:.1f}")
 
-    return w
+    return all_weights["patronus"]["weights"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Predict on new video
