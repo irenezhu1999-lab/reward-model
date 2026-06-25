@@ -219,7 +219,8 @@ def train_and_eval():
 # Predict on new video
 # ─────────────────────────────────────────────────────────────────────────────
 
-def predict_video(mp4_path: str):
+def predict_video(mp4_path: str, template: str = None):
+    """Score a single video. template: 'patronus' | 'pet_greeting' | None (auto-detect by path)."""
     try:
         import cv2, numpy as np
     except ImportError:
@@ -228,13 +229,27 @@ def predict_video(mp4_path: str):
 
     if not MODEL_OUT.exists():
         print("No model found, training first...")
-        w = train_and_eval()
-    else:
-        data = json.loads(MODEL_OUT.read_text())
-        w = data["weights"]
-        print(f"Loaded model (trained on {data['n_train']} samples, LOO-MAE={data['loo_cv_mae']})")
+        train_and_eval()
 
-    # Import optical flow detection from optical_flow_label.py
+    data = json.loads(MODEL_OUT.read_text())
+
+    # Auto-detect template from path if not specified
+    if template is None:
+        p = mp4_path.lower()
+        template = "patronus" if "patronus" in p else "pet_greeting"
+
+    models = data.get("models", {})
+    if template in models:
+        w = models[template]["weights"]
+        loo_mae = models[template]["loo_cv_mae"]
+        n_train = models[template]["n_train"]
+    else:
+        w = data["weights"]
+        loo_mae = data["loo_cv_mae"]
+        n_train = data["n_train"]
+        template = "default"
+    print(f"Model: {template} (N={n_train}, LOO-MAE={loo_mae})")
+
     sys.path.insert(0, str(Path(__file__).parent))
     from optical_flow_label import compute_flow_magnitudes, detect_fluidity_defects
 
