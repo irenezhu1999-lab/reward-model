@@ -16,7 +16,8 @@ MODEL_OUT = Path("D:/AI Magic 效果/reward_model/fluidity_model_weights.json")
 
 FEATURE_NAMES = [
     "bias", "mean_flow", "peak_flow", "peak_ratio",
-    "motion_frames", "uniform_velocity", "mid_motion_stutter", "abrupt_stop"
+    "motion_frames", "uniform_velocity", "motion_stutter", "unnatural_trajectory",
+    "motion_freeze", "joint_isolation",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -37,9 +38,11 @@ def extract_features(ann: dict) -> list[float] | None:
         peak_f,
         peak_f / (mean_f + 1e-6),
         float(motion_n),
-        float(ann["defect_flags"]["uniform_velocity"]),
-        float(ann["defect_flags"]["mid_motion_stutter"]),
-        float(ann["defect_flags"]["abrupt_stop"]),
+        float(ann["defect_flags"].get("uniform_velocity", False)),
+        float(ann["defect_flags"].get("motion_stutter", False)),
+        float(ann["defect_flags"].get("unnatural_trajectory", False)),
+        float(ann["defect_flags"].get("motion_freeze", False)),
+        float(ann["defect_flags"].get("joint_isolation", False)),
     ]
 
 def extract_features_from_flow(mags, defects: dict, fps: float = 24.0) -> list[float]:
@@ -57,8 +60,10 @@ def extract_features_from_flow(mags, defects: dict, fps: float = 24.0) -> list[f
         peak_mag / (mean_mag + 1e-6),
         float(motion_frames),
         float(defects.get("uniform_velocity", False)),
-        float(defects.get("mid_motion_stutter", False)),
-        float(defects.get("abrupt_stop", False)),
+        float(defects.get("motion_stutter", False)),
+        float(defects.get("unnatural_trajectory", False)),
+        float(defects.get("motion_freeze", False)),
+        float(defects.get("joint_isolation", False)),
     ]
 
 # ─────────────────────────────────────────────────────────────────────────────
