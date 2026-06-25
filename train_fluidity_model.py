@@ -129,6 +129,9 @@ def load_dataset(template_filter: str = None):
         feats = extract_features(a)
         if feats is None:
             continue
+        # valentines fluidity labels are all auto rule=8, zero human signal — exclude
+        if "_val" in a["video_id"]:
+            continue
         tmpl = "patronus" if "patronus" in a["video_id"] else "pet_greeting"
         if template_filter and tmpl != template_filter:
             continue
